@@ -111,7 +111,7 @@ If you find our work useful to your research, please cite it as follows:
 @article{tao2024oddn,
   title={ODDN: Addressing Unpaired Data Challenges in Open-World Deepfake Detection on Online Social Networks},
   author={Tao, Renshuai and Le, Manyi and Tan, Chuangchuang and Liu, Huan and Qin, Haotong and Zhao, Yao},
-  journal={arXiv preprint arXiv:2410.18687},
+  journal={The 39th Annual AAAI Conference on Artificial Intelligence (AAAI 2025)},
   year={2024}
 }
 
