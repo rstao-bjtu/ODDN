@@ -3,6 +3,8 @@
 <img width="350" alt="1723450312316" src="https://github.com/user-attachments/assets/44461f22-304a-45d1-804b-197a6c2fa154">  
 </div>
 
+> **Thanks to the code implementation and organization by Manyi Lee!**
+
 >  ❗️❗️❗️ **News:**
 > 
 > ✨:1. **Accepted by AAAI 2025 (Oral)**: Our research paper has been accepted by AAAI2025 and chosen as oral presentaion. And latest paper is released at https://arxiv.org/abs/2410.18687. We presents a novel approach designed to address the challenges of deepfake detection in open-world scenarios, particularly on online social networks where unpaired data is prevalent.
