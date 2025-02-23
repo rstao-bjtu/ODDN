@@ -86,7 +86,7 @@ def set_trainable(model, boolean: bool = True, except_layers: list = [], device_
             else:
                 param.requires_grad = True
     else:
-        #         assert len(except_layers) > 0, "Require free layer"
+        #assert len(except_layers) > 0, "Require free layer"
         for name, param in model.named_parameters():
             if name in except_layers:
                 param.requires_grad = True

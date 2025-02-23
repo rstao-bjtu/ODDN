@@ -52,7 +52,7 @@ class PCGrad():
         self.epoch = epoch
         grads, shapes, has_grads = self._pack_grad(objectives)
 
-        if self.epoch < self.opt.adv_warmup:
+        if self.epoch < self.opt['adv_warmup']:
             return
         
         pc_grad = self._project_conflicting(grads, has_grads)
@@ -110,7 +110,7 @@ class PCGrad():
             self.zero_grad()
             obj.backward(retain_graph=True)
             nn.utils.clip_grad_norm(self.model.parameters(), self.max_grad_norm)
-            if self.epoch < self.opt.adv_warmup:
+            if self.epoch < self.opt['adv_warmup']:
                 return None, None, None
             if idx == 0:
                 grad, shape, has_grad = self._retrieve_grad(False)

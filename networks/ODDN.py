@@ -1,16 +1,39 @@
 import torch
 import torch.nn as nn
 import os
+import numpy as np
 
 from torch.autograd import Function
-import numpy as np
 from networks.resnet import resnet50
 from networks.hkr import *
 
-"""
-Reverse Layer component
-"""
+def init_weights(net, init_type='normal', gain=0.02):
+    def init_func(m):
+        classname = m.__class__.__name__
+        if hasattr(m, 'weight') and (classname.find('Conv') != -1 or classname.find('Linear') != -1):
+            if init_type == 'normal':
+                init.normal_(m.weight.data, 0.0, gain)
+            elif init_type == 'xavier':
+                init.xavier_normal_(m.weight.data, gain=gain)
+            elif init_type == 'kaiming':
+                init.kaiming_normal_(m.weight.data, a=0, mode='fan_in')
+            elif init_type == 'orthogonal':
+                init.orthogonal_(m.weight.data, gain=gain)
+            else:
+                raise NotImplementedError('initialization method [%s] is not implemented' % init_type)
+            if hasattr(m, 'bias') and m.bias is not None:
+                init.constant_(m.bias.data, 0.0)
+        elif classname.find('BatchNorm2d') != -1:
+            init.normal_(m.weight.data, 1.0, gain)
+            init.constant_(m.bias.data, 0.0)
+
+    print('initialize network with %s' % init_type)
+    net.apply(init_func)
+
 class ReverseLayer(Function):
+    """
+    Reverse Layer component
+    """
 
     @staticmethod
     def forward(ctx, x, alpha):
@@ -24,10 +47,10 @@ class ReverseLayer(Function):
 
         return output, None
 
-"""
-self-attention mechanism: score map * feature
-"""
 class Conv2d1x1(nn.Module):
+    """
+    self-attention mechanism: score map * feature
+    """
     def __init__(self, in_f, hidden_dim, out_f):
         super(Conv2d1x1, self).__init__()
         self.fc1 = nn.Linear(in_f, hidden_dim)
@@ -37,15 +60,15 @@ class Conv2d1x1(nn.Module):
 
     def forward(self, x):
         
-        att = x
+        att = x #[bs, in_f]
 
-        att1 = self.fc1(att)
-        att2 = self.lkrelu(att1)
-        score_map = self.fc2(att2)
+        att1 = self.fc1(att) #[bs, hd]
+        att2 = self.lkrelu(att1) #[bs, hd]
+        score_map = self.fc2(att2) #[bs,out_f]
         score_map = F.softmax(score_map, dim = -1)
 
-        out = self.fc3(x)
-        attention = torch.mul(score_map, out)
+        out = self.fc3(x) #[bs, out_f]
+        attention = torch.mul(score_map, out)  
 
         x = out + attention
         x = self.lkrelu(x)
@@ -75,17 +98,16 @@ class ODDN(nn.Module):
 
         self.opt = opt
         self.total_steps = 0
-        self.isTrain = opt.isTrain
-        self.save_dir = os.path.join(opt.checkpoints_dir, opt.name)
+        self.isTrain = opt['isTrain']
+        self.save_dir = os.path.join(opt['checkpoints_dir'], opt['name'])
         self.device = torch.device('cuda')
-        
-        self.HSIC = HKRPair(weights=[0.1, 0.25, 0.5, 0.0, 0.0, 0.0], n_modality=2, sigma=6.0)
-        self.gamma = opt.gamma
 
         self.encoder_feat_dim = 2048
         self.num_classes = 1
         self.loss_fn = torch.nn.BCEWithLogitsLoss()
-
+        self.HSIC = HKRPair(weights=[0.1, 0.25, 0.5, 0.0, 0.0, 0.0], n_modality=2, sigma=6.0)
+        self.gamma = opt['gamma']
+        
         self.head_cmp = Head(
             in_f=self.encoder_feat_dim, 
             out_f=self.num_classes
@@ -105,20 +127,21 @@ class ODDN(nn.Module):
             hidden_dim=self.encoder_feat_dim // 2, 
             out_f=self.encoder_feat_dim 
         )
+        
+        if self.isTrain and not opt['continue_train']:
+            self.backbone = resnet50(pretrained=True)
+            
+        if not self.isTrain or opt['continue_train']:
+            self.backbone = resnet50(num_classes=1024)
 
-        if self.isTrain and not opt.continue_train:
-            self.resnet = resnet50(pretrained=True)
-            self.resnet.fc = nn.Linear(2048, 1024)
-
-        if not self.isTrain or opt.continue_train:
-            self.resnet = resnet50(num_classes=1024)
-
-        self.resnet = torch.nn.DataParallel(self.resnet)
+        if len(opt['device_ids']) > 1:
+            self.backbone = torch.nn.DataParallel(self.backbone)
 
     def forward(self, input, train = False, label = None, alpha = None):
-
-        ft1, ft2, ft3, ft4, resnet_feat, _ = self.resnet(input)
-        tf_feat = self.block_tf(resnet_feat)
+        
+        
+        ft1, ft2, ft3, ft4, backbone_feat, _ = self.backbone(input)
+        tf_feat = self.block_tf(backbone_feat)
         out_tf = self.head_tf(tf_feat)
 
         tf_loss, cmp_loss, dis_loss = None, None, None
@@ -134,9 +157,9 @@ class ODDN(nn.Module):
                 
                 #reverse branch
                 if alpha is not None:
-                    reverse_feat = resnet_feat[mask_label_np]
-                    reverse_feat = ReverseLayer.apply(reverse_feat, alpha)
-                    cmp_feat = self.block_cmp(reverse_feat)
+                    backbone_feat = backbone_feat[mask_label_np]
+                    backbone_feat = ReverseLayer.apply(backbone_feat, alpha)
+                    cmp_feat = self.block_cmp(backbone_feat)
                     out_cmp = self.head_cmp(cmp_feat)
                     
                     cmp_label = np.zeros(sum(mask_label_np)).astype(bool)
@@ -169,18 +192,23 @@ class ODDN(nn.Module):
                     dis_loss = dis_nc + dis_c
                 else:
                     dis_loss = dis_loss + dis_nc + dis_c
+        
+            return tf_loss, cmp_loss, dis_loss, out_tf
+        else:
             
-        return tf_loss, cmp_loss, dis_loss, out_tf
+            return out_tf
 
 
-    def save_networks(self, epoch):
-        save_filename = 'model_epoch_%s.pth' % epoch
+    def save_networks(self, name, epoch, optimizer):
+        save_filename = 'model_epoch_%s.pth' % name
         save_path = os.path.join(self.save_dir, save_filename)
 
         # serialize model and optimizer to dict
         state_dict = {
+            'epoch':epoch, 
             'model': self.state_dict(),
             'total_steps' : self.total_steps,
+            'optimizer': optimizer.state_dict()
         }
 
         torch.save(state_dict, save_path)

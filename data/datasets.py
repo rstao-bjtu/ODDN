@@ -11,6 +11,7 @@ from io import BytesIO
 from PIL import Image
 from PIL import ImageFile
 from scipy.ndimage.filters import gaussian_filter
+from copy import deepcopy
 
 class CMPDataset(Dataset):
 
@@ -33,8 +34,8 @@ class CMPDataset(Dataset):
     def __load_data__(self):
         dataset = []
         tf = None
-        for cls in self.opt.classes:
-            root = os.path.join(self.opt.dataroot, cls)
+        for cls in self.opt['classes']:
+            root = os.path.join(self.opt['dataroot'], cls)
             for root, dirs, files in os.walk(root): 
                 if '0' in root.split('/')[-1]:
                     tf = 0
@@ -42,30 +43,20 @@ class CMPDataset(Dataset):
                     tf = 1
                 for file in files:  
                     file_path = os.path.join(root, file)  
-                    dataset.append([file_path, tf, random() < self.opt.jpg_prob])  
+                    dataset.append([file_path, tf])  
         return dataset
       
-    #design for testing model's ability especially in compression image
-    def lower_quality(self,img, compress_val):
-        img = np.array(img)
-        img = self.cv2_jpg(img,compress_val)
-        return Image.fromarray(img)
-
-    def data_augment(self,img,cmp):
+    def data_augment(self,img):
         img = np.array(img)
 
-        if random() < self.opt.blur_prob:
-            sig = self.sample_continuous(self.opt.blur_sig)
+        if random() < self.opt['blur_prob']:
+            sig = self.sample_continuous(self.opt['blur_sig'])
             self.gaussian_blur(img, sig)
-
-        if cmp:
-            method = self.sample_discrete(self.opt.jpg_method)
-            qual = self.sample_discrete(self.opt.jpg_qual)
-            if self.opt.isTrain:
-                img = self.jpeg_from_key(img, 60, method) #C40
-            else:
-                img = self.jpeg_from_key(img, qual, method) #Quality-agagnostic test
-
+        
+        #method = self.sample_discrete(self.opt['jpg_method'])
+        #qual = self.sample_discrete(self.opt['jpg_qual'])
+        #img = self.jpeg_from_key(img, qual, method)
+        
         return Image.fromarray(img)
 
     def sample_continuous(self,s):
@@ -111,41 +102,43 @@ class CMPDataset(Dataset):
         return method(img, compress_val)
 
     def custom_resize(self,img):
-        interp = self.sample_discrete(self.opt.rz_interp)
-        return TF.resize(img, (self.opt.loadSize, self.opt.loadSize), interpolation=self.rz_dict[interp])
+        interp = self.sample_discrete(self.opt['rz_interp'])
+        return TF.resize(img, (self.opt['loadSize'], self.opt['loadSize']), interpolation=self.rz_dict[interp])
 
     def preprocess(self, data):
-        image_path, tf_label, cmp_label = data
-        image = Image.open(image_path)
-
+        
+        image_path, tf_label = data
+        cmp_path = image_path.replace("NoCmp", self.opt["mode"])
+        image , cmp_image , cmp_label = Image.open(image_path), None, False
+        
+        if os.path.isfile(cmp_path):
+            cmp_image = Image.open(cmp_path)
+            cmp_label = True
+        else:
+            cmp_image = deepcopy(image)
+        
         if image.mode == 'L':  
             image = image.convert('RGB')
+            cmp_image = cmp_image.convert('RGB')
 
-        if self.opt.isTrain:
-            crop_func = transforms.RandomCrop(self.opt.cropSize)
-        elif self.opt.no_crop:
+        if self.opt['isTrain']:
+            crop_func = transforms.RandomCrop(self.opt['cropSize'])
+        elif self.opt['no_crop']:
             crop_func = transforms.Lambda(lambda img: img)
         else:
-            crop_func = transforms.CenterCrop(self.opt.cropSize)
+            crop_func = transforms.CenterCrop(self.opt['cropSize'])
 
-        if self.opt.isTrain and not self.opt.no_flip:
+        if self.opt['isTrain'] and not self.opt['no_flip']:
             flip_func = transforms.RandomHorizontalFlip()
         else:
             flip_func = transforms.Lambda(lambda img: img)
 
-        if not self.opt.isTrain and self.opt.no_resize:
-            # print('='*20,'No Resize')
+        if not self.opt['isTrain'] and self.opt['no_resize']:
             rz_func = transforms.Lambda(lambda img: img)
         else:
-            # print('='*20,' Resize')
             rz_func = transforms.Lambda(lambda img: self.custom_resize(img))
         
-        aug_func = transforms.Lambda(lambda img: self.data_augment(img, cmp_label))
-
-        if self.opt.cmp:
-            cmp_func = transforms.Lambda(lambda img: self.lower_quality(img,self.opt.cmp_arg))
-        else:
-            cmp_func = transforms.Lambda(lambda img: img)
+        aug_func = transforms.Lambda(lambda img: self.data_augment(img))
 
         no_aug_transform =  transforms.Compose([
                     rz_func,
@@ -160,9 +153,8 @@ class CMPDataset(Dataset):
                     aug_func,
                     crop_func,
                     flip_func,
-                    cmp_func,
                     transforms.ToTensor(),
                     transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225]),
                 ])
 
-        return [transform(image), no_aug_transform(image), tf_label, cmp_label]
+        return [transform(cmp_image), no_aug_transform(image), tf_label, cmp_label]

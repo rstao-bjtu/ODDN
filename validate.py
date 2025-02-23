@@ -5,7 +5,6 @@ from tqdm import tqdm
 from sklearn import metrics
 from networks.resnet import resnet50
 from sklearn.metrics import average_precision_score, precision_recall_curve, accuracy_score
-from options.test_options import TestOptions
 from data import create_dataloader
 from data.datasets import*
 
@@ -17,14 +16,12 @@ def validate(model, opt):
     with torch.no_grad():
         y_true, y_pred = [], []
         for data in tqdm(data_loader):
-
             input, _, tf_label, cmp_label = data
 
             input = input.cuda()
             tf_label = tf_label.cuda().float()
 
-            tf_output = model(input)[-1]
-            
+            tf_output = model(input)
             y_pred.extend(tf_output.sigmoid().flatten().tolist())
             y_true.extend(tf_label.flatten().tolist())
 

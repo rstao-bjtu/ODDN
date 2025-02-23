@@ -22,10 +22,10 @@ class EarlyStopping:
         self.score_max = -np.Inf
         self.delta = delta
 
-    def __call__(self,score, model):
+    def __call__(self,score, epoch, model, optimizer):
         if self.best_score is None:
             self.best_score = score
-            self.save_checkpoint(score, model)
+            self.save_checkpoint(score, epoch, model, optimizer)
         elif score < self.best_score - self.delta:
             self.counter += 1
             print(f'EarlyStopping counter: {self.counter} out of {self.patience}')
@@ -33,12 +33,12 @@ class EarlyStopping:
                 self.early_stop = True
         else:
             self.best_score = score
-            self.save_checkpoint(score, model)
+            self.save_checkpoint(score, epoch, model, optimizer)
             self.counter = 0
 
-    def save_checkpoint(self, score, model):
+    def save_checkpoint(self, score, epoch, model, optimizer):
         '''Saves model when validation loss decrease.'''
         if self.verbose:
             print(f'Validation accuracy increased ({self.score_max:.6f} --> {score:.6f}).  Saving model ...')
-        model.save_networks('best')
+        model.save_networks('best', epoch, optimizer)
         self.score_max = score
